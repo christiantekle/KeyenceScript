@@ -96,7 +96,7 @@ offset_y = find_phase_shift(middle_col1, middle_col2)
 
 print(f"Estimated offsets: x={offset_x} pixels, y={offset_y} pixels")
 
-# Step 4: Shift the second depth map
+# Step 4: Shift the second depth mapö
 depth_map2_shifted = shift_depth_map(depth_map2, offset_x, offset_y)
 
 # Step 5: Merge the depth maps
