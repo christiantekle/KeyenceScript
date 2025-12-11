@@ -1,44 +1,12 @@
 """
 io_utils.py
 
-File I/O utilities for loading and saving point clouds and depth maps.
+File I/O utilities for saving and loading depth maps and CSV data.
+Note: For loading PCD/STL point clouds, use clean_depth_utils.py
 """
 
 import os
 import numpy as np
-
-try:
-    import open3d as o3d
-except Exception:
-    o3d = None
-
-
-def load_stl_points(stl_filename: str, sample_points: int = None) -> np.ndarray:
-    """
-    Load STL file and return vertices as Nx3 array.
-    If sample_points is specified, uniformly sample the mesh.
-    """
-    if o3d is None:
-        raise RuntimeError("open3d required for load_stl_points")
-    
-    mesh = o3d.io.read_triangle_mesh(stl_filename)
-    
-    if sample_points:
-        pcd = mesh.sample_points_uniformly(number_of_points=int(sample_points))
-        pts = np.asarray(pcd.points)
-    else:
-        pts = np.asarray(mesh.vertices)
-    
-    return pts
-
-
-def load_pcd_points(pcd_filename: str) -> np.ndarray:
-    """Load PCD file and return points as Nx3 array."""
-    if o3d is None:
-        raise RuntimeError("open3d required for load_pcd_points")
-    
-    pcd = o3d.io.read_point_cloud(pcd_filename)
-    return np.asarray(pcd.points)
 
 
 def save_depth_map(filename: str, data: np.ndarray) -> None:
@@ -52,10 +20,21 @@ def load_depth_map(filename: str) -> np.ndarray:
     return np.load(filename)
 
 
-def save_to_csv(filename: str, data: np.ndarray) -> None:
-    """Save numpy array to CSV file."""
+def save_to_csv(filename: str, data: np.ndarray, delimiter: str = ',', header: str = '') -> None:
+    """
+    Save numpy array to CSV file.
+    
+    Args:
+        filename: Output CSV file path
+        data: Numpy array to save
+        delimiter: Delimiter character (default: ',')
+        header: Optional header string
+    """
     os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
-    np.savetxt(filename, data, delimiter=',')
+    if header:
+        np.savetxt(filename, data, delimiter=delimiter, header=header, comments='')
+    else:
+        np.savetxt(filename, data, delimiter=delimiter)
 
 
 def read_columns(file_path: str, first_col: int = 1, second_col: int = 2) -> np.ndarray:
@@ -63,7 +42,13 @@ def read_columns(file_path: str, first_col: int = 1, second_col: int = 2) -> np.
     Read two columns from a whitespace-delimited file.
     Skips the first line (header).
     
-    Returns: 2xN array where first row is first column, second row is second column
+    Args:
+        file_path: Path to input file
+        first_col: Index of first column to extract (0-based)
+        second_col: Index of second column to extract (0-based)
+    
+    Returns:
+        2xN array where first row is first column, second row is second column
     """
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -74,7 +59,28 @@ def read_columns(file_path: str, first_col: int = 1, second_col: int = 2) -> np.
     for line in lines[1:]:  # Skip header
         parts = line.strip().split()
         if len(parts) > max(first_col, second_col):
-            first.append(float(parts[first_col]))
-            second.append(float(parts[second_col]))
+            try:
+                first.append(float(parts[first_col]))
+                second.append(float(parts[second_col]))
+            except (ValueError, IndexError):
+                continue  # Skip malformed lines
     
     return np.array([first, second])
+
+
+def load_columns_from_csv(filename: str, cols: list = None, delimiter: str = ',', 
+                          skip_header: int = 1) -> np.ndarray:
+    """
+    Load specific columns from a CSV file.
+    
+    Args:
+        filename: Path to CSV file
+        cols: List of column indices to load (None = all columns)
+        delimiter: Delimiter character
+        skip_header: Number of header rows to skip
+    
+    Returns:
+        Numpy array with requested columns
+    """
+    return np.loadtxt(filename, delimiter=delimiter, skiprows=skip_header, 
+                     usecols=cols, ndmin=2)
