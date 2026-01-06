@@ -138,3 +138,48 @@ def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float = DEPTH_MA
     fig.canvas.mpl_connect('button_press_event', onclick)
     plt.tight_layout()
     plt.show(block=True)
+
+
+def plot_histogram_cdf(dm_part, bins=50, title='Histogram and Cumulative Distribution Function'):
+    """
+    Plots the histogram and cumulative distribution function (CDF) of a depth map segment.
+
+    Args:
+        dm_part (np.ndarray): 2D array or segment of a depth map.
+        bins (int): Number of histogram bins.
+        title (str): Plot title.
+    """
+    # Only valid (finite) values
+    vals = dm_part[np.isfinite(dm_part)]
+
+    # Compute histogram
+    hist, bin_edges = np.histogram(vals, bins=bins)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # Compute CDF
+    cdf = np.cumsum(hist) / np.sum(hist)
+
+    # Plot
+    fig, ax1 = plt.subplots(figsize=(8,5))
+
+    # Histogram (bars) on left Y-axis
+    ax1.bar(bin_centers, hist, width=bin_edges[1]-bin_edges[0],
+            alpha=0.6, color='skyblue', label='Histogram')
+    ax1.set_xlabel('Depth')
+    ax1.set_ylabel('Frequency')
+    ax1.grid(True, alpha=0.3)
+
+    # CDF on right Y-axis
+    ax2 = ax1.twinx()
+    ax2.plot(bin_centers, cdf, color='red', marker='o', label='CDF')
+    ax2.set_ylabel('Cumulative Probability')
+    ax2.set_ylim(0, 1)
+
+    # Combine legends
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines + lines2, labels + labels2, loc='upper left')
+
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()    
