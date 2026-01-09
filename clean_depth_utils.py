@@ -19,10 +19,11 @@ except Exception:
 
 try:
     from scipy import stats
-    from scipy.interpolate import griddata
+    from scipy.interpolate import griddata, RegularGridInterpolator
 except Exception:
     stats = None
     griddata = None
+    RegularGridInterpolator = None
 
 try:
     from sklearn.linear_model import RANSACRegressor, LinearRegression
@@ -95,7 +96,7 @@ def points_to_depth_map(points: np.ndarray,
     """
     Convert Nx3 points (x,y,z) into a 2D depth map (numpy array) by binning points into a grid.
     - resolution: grid cell size in same units as points (default 0.001)
-    - agg: aggregation method for multiple points in same cell: "max", "mean", "median"
+    - agg: aggregation method for multiple points in same cell: "max". "min", "mean", "median"
     - fill_method: if 'griddata' will try to interpolate NaNs using scipy.interpolate.griddata (slow but smooth)
     - bounds: optional ((xmin, xmax), (ymin, ymax)). If None, computed from points.
 
@@ -143,6 +144,13 @@ def points_to_depth_map(points: np.ndarray,
                 cur = depth_map[y_i, x_i]
                 if np.isnan(cur) or z > cur:
                     depth_map[y_i, x_i] = z
+        elif agg == "min":
+              for x_i, y_i, z in zip(x_idx, y_idx, zs):
+                 if np.isnan(z):
+                     continue
+                 cur = depth_map[y_i, x_i]
+                 if np.isnan(cur) or z < cur:
+                    depth_map[y_i, x_i] = z
         elif agg == "mean" or agg == "median":
             from collections import defaultdict
             cells = defaultdict(list)
@@ -176,6 +184,73 @@ def points_to_depth_map(points: np.ndarray,
                 depth_map[missing_mask] = filled
 
     return depth_map, x_edges, y_edges
+
+
+def scale_depth_map_xy(
+    depth_map: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    scale_z: float = 1.0,
+    method: str = "linear",
+    fill_value: float = np.nan):
+    
+    """
+    Scale a 2D depth map in X and/or Y direction (geometric scaling).
+
+    Parameters
+    ----------
+    depth_map : (H, W) array
+        Input depth map
+    x_edges, y_edges : bin edges as returned by points_to_depth_map
+    scale_x, scale_y : scaling factors (>1 stretches, <1 shrinks)
+    method : 'linear' or 'nearest'
+    fill_value : value outside original domain
+
+    Returns
+    -------
+    depth_map_scaled : 2D array
+    x_edges_scaled : 1D array
+    y_edges_scaled : 1D array
+    """
+
+    if depth_map.ndim != 2:
+        raise ValueError("depth_map must be 2D")
+
+    # Cell centers
+    x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+    y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+
+    # Interpolator (NaNs allowed)
+    interp = RegularGridInterpolator(
+        (y_centers, x_centers),
+        depth_map,
+        method=method,
+        bounds_error=False,
+        fill_value=fill_value,
+    )
+
+    # New scaled grid
+    x_centers_new = x_centers * scale_x
+    y_centers_new = y_centers * scale_y
+
+    XXn, YYn = np.meshgrid(x_centers_new, y_centers_new)
+    query_points = np.column_stack([YYn.ravel(), XXn.ravel()])
+
+    depth_map_scaled = interp(query_points).reshape(
+        len(y_centers_new), len(x_centers_new)
+    ) 
+    
+    
+    if (scale_z != 1.0):
+      depth_map_scaled = depth_map_scaled * scale_z
+
+    # Scale edges accordingly
+    x_edges_scaled = x_edges * scale_x
+    y_edges_scaled = y_edges * scale_y
+
+    return depth_map_scaled, x_edges_scaled, y_edges_scaled
 
 # Example utility: high-level pipeline
 def load_and_grid(input_path: str, kind: str = "pcd", resolution: float = 0.001, sample_points: int = None):

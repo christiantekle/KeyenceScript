@@ -29,12 +29,11 @@ def load_stl_points(stl_filename: str, sample_points: int = None) -> np.ndarray:
         pcd = mesh.sample_points_uniformly(number_of_points=int(sample_points))
         pts = np.asarray(pcd.points)
     else:
-        pts = np.asarray(mesh.vertices)
-        pts = mesh.sample_points_uniformly(number_of_points=pts.size ) #* 30)
-        pts = np.asarray(pts)
+        sample_points = len(mesh.vertices) * 3 #* 30
+        pcd = mesh.sample_points_uniformly(number_of_points=sample_points ) 
+        pts = np.asarray(pcd.points)
     
     return pts
-
 
 
 def load_pcd_points(pcd_filename: str) -> np.ndarray:

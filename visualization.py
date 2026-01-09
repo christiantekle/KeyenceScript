@@ -6,6 +6,8 @@ Plotting and visualization utilities for depth maps.
 
 import os
 import numpy as np
+import datetime
+
 
 try:
     import matplotlib.pyplot as plt
@@ -14,24 +16,22 @@ except Exception:
     plt = None
 
 
-DEPTH_MAP_RESOLUTION_XY = 2  # microns
-
 
 def plot_depth_map(depth_map: np.ndarray, title: str = "depth_map",
                   z_min: float = None, z_max: float = None,
-                  lateral_resolution: float = DEPTH_MAP_RESOLUTION_XY,
+                  lateral_resolution: float = 0.01,
                   output_folder: str = ".") -> None:
     """Plot depth map and save as PNG."""
     if plt is None:
         raise RuntimeError("matplotlib required for plotting")
     
-    x = np.arange(depth_map.shape[1]) * lateral_resolution * 1e-3  # to mm
-    y = np.arange(depth_map.shape[0]) * lateral_resolution * 1e-3
+    x = np.arange(depth_map.shape[1]) * lateral_resolution  # to mm
+    y = np.arange(depth_map.shape[0]) * lateral_resolution
     
     plt.figure()
     im = plt.imshow(depth_map, extent=[x.min(), x.max(), y.min(), y.max()],
                    vmin=z_min, vmax=z_max, origin='lower', cmap='jet', aspect='equal')
-    plt.colorbar(im, label='Z [µm]')
+    plt.colorbar(im, label='Z [mm]')
     plt.title(title)
     plt.xlabel('X [mm]')
     plt.ylabel('Y [mm]')
@@ -42,7 +42,7 @@ def plot_depth_map(depth_map: np.ndarray, title: str = "depth_map",
     plt.close()
 
 
-def plot_3d_depth_maps(depth_maps: list, lateral_resolution: float = DEPTH_MAP_RESOLUTION_XY,
+def plot_3d_depth_maps(depth_maps: list, lateral_resolution: float = 0.01,
                       alphas: list = None, colormap: str = 'jet') -> None:
     """Interactive 3D surface plot of one or more depth maps."""
     if plt is None:
@@ -58,13 +58,13 @@ def plot_3d_depth_maps(depth_maps: list, lateral_resolution: float = DEPTH_MAP_R
     ax = fig.add_subplot(111, projection='3d')
     
     ny, nx = depth_maps[0].shape
-    x = np.arange(nx) * lateral_resolution * 1e-3  # mm
-    y = np.arange(ny) * lateral_resolution * 1e-3
+    x = np.arange(nx) * lateral_resolution   # mm
+    y = np.arange(ny) * lateral_resolution 
     X, Y = np.meshgrid(x, y)
     
     for i, Z in enumerate(depth_maps):
         alpha = alphas[i] if i < len(alphas) else 1.0
-        surf = ax.plot_surface(X, Y, Z * 1e-3, cmap=colormap, alpha=alpha,
+        surf = ax.plot_surface(X, Y, Z, cmap=colormap, alpha=alpha,
                               edgecolor='none', antialiased=True)
     
     ax.set_xlabel('X [mm]')
@@ -76,7 +76,7 @@ def plot_3d_depth_maps(depth_maps: list, lateral_resolution: float = DEPTH_MAP_R
     plt.show()
 
 
-def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float = DEPTH_MAP_RESOLUTION_XY) -> None:
+def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float) -> None:
     """
     Interactive depth map viewer. Click to show X/Y cuts.
     """
@@ -89,10 +89,10 @@ def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float = DEPTH_MA
     fig, (ax_main, ax_xcut, ax_ycut) = plt.subplots(1, 3, figsize=(18, 6))
     
     # Main heatmap
-    im = ax_main.imshow(z, extent=[x.min() * 1e-3, x.max() * 1e-3, 
-                                   y.min() * 1e-3, y.max() * 1e-3],
-                       origin='lower', cmap='jet', aspect='equal')
-    fig.colorbar(im, ax=ax_main, label='Height (µm)')
+    im = ax_main.imshow(z, extent=[x.min() , x.max() , 
+                                   y.min() , y.max() ],
+                        origin='lower', cmap='jet', aspect='equal')
+    fig.colorbar(im, ax=ax_main, label='Height (mm)')
     ax_main.set_xlabel('X (mm)')
     ax_main.set_ylabel('Y (mm)')
     ax_main.set_title('Click on map to view X/Y cuts')
@@ -106,17 +106,17 @@ def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float = DEPTH_MA
     ax_ycut.set_ylabel('Height (mm)')
     
     def update_cuts(ix, iy):
-        x_mm = lateral_resolution * ix * 1e-3
-        y_mm = lateral_resolution * iy * 1e-3
+        x_mm = lateral_resolution * ix 
+        y_mm = lateral_resolution * iy 
         
         ax_xcut.clear()
-        ax_xcut.plot(x * 1e-3, z[iy, :] * 1e-3, color='red')
+        ax_xcut.plot(x , z[iy, :],  color='red')
         ax_xcut.set_title(f'Horizontal Cut at Y = {y_mm:.2f} mm')
         ax_xcut.set_xlabel('X (mm)')
         ax_xcut.set_ylabel('Height (mm)')
         
         ax_ycut.clear()
-        ax_ycut.plot(y * 1e-3, z[:, ix] * 1e-3, color='blue')
+        ax_ycut.plot(y, z[:, ix], color='blue')
         ax_ycut.set_title(f'Vertical Cut at X = {x_mm:.2f} mm')
         ax_ycut.set_xlabel('Y (mm)')
         ax_ycut.set_ylabel('Height (mm)')
@@ -127,19 +127,210 @@ def plot_depth_map_with_cuts(z: np.ndarray, lateral_resolution: float = DEPTH_MA
         if event.inaxes != ax_main or event.xdata is None or event.ydata is None:
             return
         
-        x_click = event.xdata * 1e3
-        y_click = event.ydata * 1e3
+        x_click = event.xdata 
+        y_click = event.ydata 
         ix = int(round(x_click / lateral_resolution))
         iy = int(round(y_click / lateral_resolution))
         
         if 0 <= ix < z.shape[1] and 0 <= iy < z.shape[0]:
             update_cuts(ix, iy)
-    
+            
     fig.canvas.mpl_connect('button_press_event', onclick)
     plt.tight_layout()
     plt.show(block=True)
+    
+    
 
 
+
+def export_current_cuts(z_maps, x, y, ix, iy, lateral_resolution, out_dir=None):
+    """Export horizontal/vertical cuts at ix, iy for all maps."""
+    if out_dir is None:
+        out_dir = f"cuts_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    os.makedirs(out_dir, exist_ok=True)
+
+    x_mm = ix * lateral_resolution
+    y_mm = iy * lateral_resolution
+
+    for i, z in enumerate(z_maps):
+        # Horizontal cut
+        if 0 <= iy < z.shape[0]:
+            values = z[iy, :]
+            coord = x[:len(values)]
+            mask = np.isfinite(values)
+            data = np.column_stack((coord[mask], values[mask]))
+            fname = f"map{i}_horizontal_Y{y_mm:.3f}mm.csv"
+            np.savetxt(
+                os.path.join(out_dir, fname),
+                data,
+                delimiter=",",
+                header="x_mm,height_mm",
+                comments=""
+            )
+
+        # Vertical cut
+        if 0 <= ix < z.shape[1]:
+            values = z[:, ix]
+            coord = y[:len(values)]
+            mask = np.isfinite(values)
+            data = np.column_stack((coord[mask], values[mask]))
+            fname = f"map{i}_vertical_X{x_mm:.3f}mm.csv"
+            np.savetxt(
+                os.path.join(out_dir, fname),
+                data,
+                delimiter=",",
+                header="y_mm,height_mm",
+                comments=""
+            )
+
+def plot_mult_depth_map_with_cuts(z_maps, names=None, lateral_resolution=0.01):
+    """Interactive depth map viewer with cuts and export."""
+    if plt is None:
+        raise RuntimeError("matplotlib required for plotting")
+    if len(z_maps) == 0:
+        raise ValueError("z_maps must not be empty")
+    
+    z_maps = [np.asarray(z) for z in z_maps]
+    if names is None:
+        names = [f"Depth Map {i}" for i in range(len(z_maps))]
+    elif len(names) != len(z_maps):
+        raise ValueError("names must have same length as z_maps")
+
+    plt.ion()
+    
+    # Dimensions for main map (use largest map for consistent axes)
+    max_H = max(z.shape[0] for z in z_maps)
+    max_W = max(z.shape[1] for z in z_maps)
+    x_full = np.arange(max_W) * lateral_resolution
+    y_full = np.arange(max_H) * lateral_resolution
+
+    fig, (ax_main, ax_xcut, ax_ycut) = plt.subplots(1, 3, figsize=(18, 6))
+    active_idx = 0
+    colors = plt.cm.tab10.colors
+    last_ix, last_iy = None, None
+
+    # --- Helper: NaN-safe plot ---
+    def nan_safe_plot(ax, coord, values, **kwargs):
+        values = np.asarray(values)
+        coord = np.asarray(coord)
+        min_len = min(len(coord), len(values))
+        coord = coord[:min_len]
+        values = values[:min_len]
+        mask = np.isfinite(values)
+        if np.any(mask):
+            ax.plot(coord[mask], values[mask], **kwargs)
+
+    # --- Update cuts ---
+    def update_cuts(ix, iy):
+        nonlocal last_ix, last_iy
+        last_ix, last_iy = ix, iy
+        x_mm = ix * lateral_resolution
+        y_mm = iy * lateral_resolution
+
+        ax_xcut.clear()
+        ax_ycut.clear()
+
+        for i, z in enumerate(z_maps):
+            c = colors[i % len(colors)]
+            label = names[i]
+            x = np.arange(z.shape[1]) * lateral_resolution
+            y = np.arange(z.shape[0]) * lateral_resolution
+
+            if 0 <= iy < z.shape[0]:
+                nan_safe_plot(ax_xcut, x, z[iy, :], color=c, label=label)
+            if 0 <= ix < z.shape[1]:
+                nan_safe_plot(ax_ycut, y, z[:, ix], color=c, label=label)
+
+        ax_xcut.set_title(f"Horizontal Cut @ Y = {y_mm:.2f} mm")
+        ax_xcut.set_xlabel("X (mm)")
+        ax_xcut.set_ylabel("Height (mm)")
+        ax_xcut.legend()
+
+        ax_ycut.set_title(f"Vertical Cut @ X = {x_mm:.2f} mm")
+        ax_ycut.set_xlabel("Y (mm)")
+        ax_ycut.set_ylabel("Height (mm)")
+        ax_ycut.legend()
+
+        # Update crosshair
+        vline.set_xdata([x_mm, x_mm])
+        hline.set_ydata([y_mm, y_mm])
+        fig.canvas.draw_idle()
+
+    # --- Update main image ---
+    def update_main_image():
+        im.set_data(z_maps[active_idx])
+        ax_main.set_title(f"{names[active_idx]} (scroll to change, press 'E' for CSV export) – click to cut")
+        im.autoscale()
+        fig.canvas.draw_idle()
+
+    # --- Main image ---
+    im = ax_main.imshow(
+        z_maps[active_idx],
+        extent=[0, max_W*lateral_resolution, 0, max_H*lateral_resolution],
+        origin="lower",
+        cmap="jet",
+        aspect="equal"
+    )
+    fig.colorbar(im, ax=ax_main, label="Height (mm)")
+
+    ax_main.set_xlabel("X (mm)")
+    ax_main.set_ylabel("Y (mm)")
+    ax_main.set_title(f"{names[active_idx]} (scroll to change, press 'E' for CSV export) – click to cut")
+
+    vline = ax_main.axvline(np.nan, color="white", lw=1)
+    hline = ax_main.axhline(np.nan, color="white", lw=1)
+
+    # --- Cut axes ---
+    ax_xcut.set_xlabel("X (mm)")
+    ax_xcut.set_ylabel("Height (mm)")
+    ax_ycut.set_xlabel("Y (mm)")
+    ax_ycut.set_ylabel("Height (mm)")
+
+    # --- Event callbacks ---
+    def onclick(event):
+        if event.inaxes != ax_main or event.xdata is None or event.ydata is None:
+            return
+        ix = int(round(event.xdata / lateral_resolution))
+        iy = int(round(event.ydata / lateral_resolution))
+        if 0 <= ix < max_W and 0 <= iy < max_H:
+            update_cuts(ix, iy)
+
+    def onscroll(event):
+        nonlocal active_idx
+        if event.button == "up":
+            active_idx = (active_idx + 1) % len(z_maps)
+        elif event.button == "down":
+            active_idx = (active_idx - 1) % len(z_maps)
+        update_main_image()
+        if last_ix is not None and last_iy is not None:
+            update_cuts(last_ix, last_iy)
+
+    def onkey(event):
+        if event.key == "e":
+            if last_ix is None or last_iy is None:
+                print("No cut selected yet – click on the map first.")
+                return
+            export_current_cuts(
+                z_maps=z_maps,
+                x=x_full,
+                y=y_full,
+                ix=last_ix,
+                iy=last_iy,
+                lateral_resolution=lateral_resolution
+            )
+            print(f"Exported cuts at ix={last_ix}, iy={last_iy}")
+
+    fig.canvas.mpl_connect("button_press_event", onclick)
+    fig.canvas.mpl_connect("scroll_event", onscroll)
+    fig.canvas.mpl_connect("key_press_event", onkey)
+
+    plt.tight_layout()
+    plt.show(block=True)
+    plt.ioff()
+
+
+        
+    
 def plot_histogram_cdf(dm_part, bins=50, title='Histogram and Cumulative Distribution Function'):
     """
     Plots the histogram and cumulative distribution function (CDF) of a depth map segment.
