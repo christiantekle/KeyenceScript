@@ -8,11 +8,16 @@ import os
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+import gc
 
 try:
     import open3d as o3d
 except Exception:
     o3d = None
+    
+from global_defs import depthmapVarType   
+
+
 
 
 def load_stl_points(stl_filename: str, sample_points: int = None) -> np.ndarray:
@@ -33,7 +38,7 @@ def load_stl_points(stl_filename: str, sample_points: int = None) -> np.ndarray:
         pcd = mesh.sample_points_uniformly(number_of_points=sample_points ) 
         pts = np.asarray(pcd.points)
     
-    return pts
+    return pts.astype(depthmapVarType, copy=False)
 
 
 def load_pcd_points(pcd_filename: str) -> np.ndarray:
@@ -42,12 +47,12 @@ def load_pcd_points(pcd_filename: str) -> np.ndarray:
         raise RuntimeError("open3d required for load_pcd_points")
     
     pcd = o3d.io.read_point_cloud(pcd_filename)
-    return np.asarray(pcd.points)
+    return np.asarray(pcd.points).astype(depthmapVarType, copy=False)
 
 
 def load_depth_map(filename: str) -> np.ndarray:
     """Load depth map from .npy file."""
-    return np.load(filename)
+    return np.load(filename).astype(depthmapVarType, copy=False)
     
 
 def read_columns(file_path: str, first_col: int = 1, second_col: int = 2) -> np.ndarray:
@@ -69,23 +74,27 @@ def read_columns(file_path: str, first_col: int = 1, second_col: int = 2) -> np.
             first.append(float(parts[first_col]))
             second.append(float(parts[second_col]))
     
-    return np.array([first, second])
+    return np.array([first, second]).astype(depthmapVarType, copy=False)
 
 
 def save_to_csv(filename: str, data: np.ndarray, formatting = '%s') -> None:
     """Save numpy array to CSV file."""
+    if data is None: 
+        return None
     os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
     np.savetxt(fname=filename, X=data, delimiter=';', fmt=formatting)
-    
-    
+
 
 def save_depth_map(filename: str, data: np.ndarray) -> None:
     """Save depth map to .npy file."""
+    if data is None: 
+        return None
     os.makedirs(os.path.dirname(filename) or '.', exist_ok=True)
     np.save(filename, data)
 
-def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0, 
-                fileName='', diameter=None, theta_max=None):
+
+def save_to_stl(data: np.ndarray, resolution: float=0.01, poisson_depth:int=9, poisson_width:int=0, 
+                fileName:str='', diameter:float=None, theta_max:float=None):
     """
     Convert a depth map to a TriangleMesh using Poisson surface reconstruction.
     Supports flat or cylindrical projection. 
@@ -105,8 +114,12 @@ def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0,
     Returns:
         o3d.geometry.TriangleMesh: The reconstructed mesh.
     """
-
-    depthmap = depthmap.astype(np.float32)
+    #gc.collect() # purge managed memory
+    
+    if data is None: 
+        return None
+    
+    depthmap = data.astype(depthmapVarType, copy=True)
     H, W = depthmap.shape
 
     if (diameter is not None) and (diameter > 0):
@@ -119,14 +132,14 @@ def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0,
         
         theta_grid, x_grid = np.meshgrid(theta, np.arange(W) * resolution)
         
-        # depthmap transponieren, damit H ↔ Umfang passt
+        # depthmap transponieren, damit H <-> Umfang passt
         dm = depthmap.T
         
         X = x_grid   # Zylinderachse
         Y = (radius + dm) * np.cos(theta_grid)
         Z = (radius + dm) * np.sin(theta_grid)
         
-        points = np.column_stack([X.flatten(), Y.flatten(), Z.flatten()])       
+        points = np.column_stack([X.flatten(), Y.flatten(), Z.flatten()]).astype(depthmapVarType, copy=False)       
     else:
         # Flache Projektion
         y_idx, x_idx = np.indices((H, W))
@@ -134,7 +147,10 @@ def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0,
             x_idx.flatten() * resolution,
             y_idx.flatten() * resolution,
             depthmap.flatten()
-        ])
+        ]).astype(depthmapVarType, copy=False)
+        
+    del depthmap   # purge memory
+    #gc.collect()
 
     # Open3D PointCloud erstellen
     pcd = o3d.geometry.PointCloud()
@@ -144,16 +160,15 @@ def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0,
     pcd.estimate_normals()
 
     # Farben basierend auf z-Höhe
-    norm = plt.Normalize(points[:, 2].min(), points[:, 2].max())
-    cmap = cm.jet
-    colors = cmap(norm(points[:, 2]))[:, :3]
-    pcd.colors = o3d.utility.Vector3dVector(colors)
+    #norm = plt.Normalize(points[:, 2].min(), points[:, 2].max())
+    #cmap = cm.jet
+    #colors = cmap(norm(points[:, 2]))[:, :3]
+    #pcd.colors = o3d.utility.Vector3dVector(colors)
 
     # Poisson-Rekonstruktion
-    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-        pcd, depth=poisson_depth, width=poisson_width
-    )
-
+    mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+        pcd, depth=poisson_depth, width=poisson_width)    #mesh, densities
+   
     # Mesh bereinigen
     mesh.remove_duplicated_vertices()
     mesh.remove_duplicated_triangles()
@@ -165,73 +180,7 @@ def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0,
     mesh = mesh.crop(bbox)
 
     # Speichern, falls gewünscht
-    if fileName:
+    if (fileName != ''):
         o3d.io.write_triangle_mesh(fileName, mesh, print_progress=False)
 
     return mesh
-
-
-# def save_to_stl(depthmap, resolution=0.01, poisson_depth=9, poisson_width=0, is_closed=False, fileName=''):
-#     """
-#     Convert a PointCloud to a TriangleMesh using Poisson surface reconstruction.
-
-#     Args:
-#         point_cloud (o3d.geometry.PointCloud): The input point cloud.
-#         poisson_depth (int): Depth parameter for Poisson surface reconstruction (default: 9).
-#         poisson_width (int): Width parameter for Poisson surface reconstruction (default: 0).
-
-#     Returns:
-#         o3d.geometry.TriangleMesh: The converted mesh.
-#     """
-    
-#     dim = np.shape(depthmap)
-
-#     # Generate grid for x- & y-coordinats
-#     x_grid, y_grid = np.meshgrid(np.arange(dim[1]), np.arange(dim[0]))
-    
-#     # Calculate point cloud
-#     p = np.column_stack([x_grid.flatten() * resolution, y_grid.flatten() * resolution, depthmap.flatten()])
-#     pcd = o3d.geometry.PointCloud()
-    
-#     # Sweep memory
-#     del x_grid, y_grid
-    
-#     # Befülle die Punktwolke
-#     pcd.points = o3d.utility.Vector3dVector(p)
-    
-#     # Perform Poisson surface reconstruction
-#     pcd.estimate_normals()
-    
-#     # Calculate colors based on z-height
-#     norm = plt.Normalize(p[:, 2].min(), p[:, 2].max())
-#     cmap = cm.jet
-#     colors = cmap(norm(p[:, 2]))
-#     pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
-   
-#     # Sweep memory
-#     del p, norm
-   
-   
-#     # Create a blank mesh
-#     mesh_dat = o3d.geometry.TriangleMesh()
-
-#     # Perform Poisson surface reconstruction
-#     mesh_dat, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-#         pcd, depth=poisson_depth, width=poisson_width)
-    
-#     # Extract the triangles from the mesh
-#     mesh_dat.compute_vertex_normals()
-#     mesh_dat.remove_duplicated_triangles()
-#     mesh_dat.remove_duplicated_vertices()
-#     mesh_dat.remove_non_manifold_edges()
-    
-#     # Remove extrapolations of Poisson algorithm
-#     bbox = pcd.get_axis_aligned_bounding_box()
-#     mesh_dat = mesh_dat.crop(bbox)
-    
-       
-#     if fileName!='':
-#       o3d.io.write_triangle_mesh(mesh = mesh_dat,filename = fileName, print_progress = False)
-
-    
-#     return mesh_dat
