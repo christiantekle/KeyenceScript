@@ -10,8 +10,6 @@ Minimal utilities to:
 """
 
 import numpy as np
-import gc
-from global_defs import depthmapVarType
 
 # Optional imports (used only when functions that rely on them are called)
 try:
@@ -49,7 +47,7 @@ def stl_to_points(stl_path: str, sample_points: int = None) -> np.ndarray:
         # Return triangle vertices (may contain duplicates)
         verts = np.asarray(mesh.vertices, dtype=float)
         pts = verts
-    return pts.astype(depthmapVarType, copy=False)
+    return pts
 
 def pcd_to_points(pcd_path: str) -> np.ndarray:
     """
@@ -60,7 +58,7 @@ def pcd_to_points(pcd_path: str) -> np.ndarray:
         raise RuntimeError("open3d is required for pcd_to_points. Install with `pip install open3d`.")
     pcd = o3d.io.read_point_cloud(pcd_path)
     pts = np.asarray(pcd.points, dtype=float)
-    return pts.astype(depthmapVarType, copy=False)
+    return pts
 
 def fit_plane_ransac(points: np.ndarray, residual_threshold: float = 0.001, min_samples: int = 3):
     """
@@ -70,7 +68,6 @@ def fit_plane_ransac(points: np.ndarray, residual_threshold: float = 0.001, min_
     """
     if RANSACRegressor is None or LinearRegression is None:
         raise RuntimeError("scikit-learn is required for fit_plane_ransac. Install with `pip install scikit-learn`.")
-    points = points.astype(depthmapVarType, copy=False)    
     X = points[:, :2]
     y = points[:, 2]
     base = LinearRegression()
@@ -87,10 +84,9 @@ def remove_plane(points: np.ndarray, a: float, b: float, c: float) -> np.ndarray
     Subtract plane z = a*x + b*y + c from points (in-place safe copy).
     Returns new Nx3 array with z' = z - (a*x + b*y + c)
     """
-    points = points.astype(depthmapVarType, copy=False)
     pts = points.copy()
     pts[:, 2] = pts[:, 2] - (a * pts[:, 0] + b * pts[:, 1] + c)
-    return pts.astype(depthmapVarType, copy=False)
+    return pts
 
 def points_to_depth_map(points: np.ndarray,
                         resolution: float = 0.001,
@@ -111,8 +107,6 @@ def points_to_depth_map(points: np.ndarray,
     """
     if points.size == 0:
         raise ValueError("Empty points array")
-        
-    points = points.astype(depthmapVarType, copy=False)
 
     xs = points[:, 0]
     ys = points[:, 1]
@@ -189,111 +183,77 @@ def points_to_depth_map(points: np.ndarray,
                 filled = griddata(known_points, known_values, missing_points, method="nearest")
                 depth_map[missing_mask] = filled
 
-    return depth_map.astype(depthmapVarType, copy=False), x_edges, y_edges
+    return depth_map, x_edges, y_edges
 
-
-def autolevel_depth_map(depth_map: np.ndarray, flipZdirection: bool = False) -> np.ndarray:
-    """
-    Sets the maximum z-level of a depth map to 0 (max(z) -> 0)
-    by optionally flipping Z and shifting all values accordingly.
-
-    Parameters
-    ----------
-    depth_map : (H, W) ndarray
-        Input depth map
-    flipZdirection : bool
-        If True, invert Z direction before leveling
-
-    Returns
-    -------
-    depth_map_shifted : (H, W) ndarray
-    """
-
-    if depth_map.ndim != 2:
-        raise ValueError("depth_map must be a 2D array")
-
-    # Optional Z flip
-    depth_map_shifted = -depth_map if flipZdirection else depth_map.copy()
-
-    # Shift so that maximum becomes zero (NaN-safe)
-    max_val = np.nanmax(depth_map_shifted)
-    depth_map_shifted = depth_map_shifted - max_val
-
-    return depth_map_shifted.astype(depthmapVarType, copy=False)
 
 def scale_depth_map_xy(
     depth_map: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
     scale_x: float = 1.0,
     scale_y: float = 1.0,
     scale_z: float = 1.0,
     method: str = "linear",
-    fill_value: float = np.nan,
-) -> np.ndarray:
+    fill_value: float = np.nan):
+    
     """
-    Geometrically scale a 2D depth map in X and Y directions.
+    Scale a 2D depth map in X and/or Y direction (geometric scaling).
 
     Parameters
     ----------
-    depth_map : (H, W) ndarray
+    depth_map : (H, W) array
         Input depth map
-    scale_x : float
-        Scaling factor in X (>1 stretches, <1 shrinks)
-    scale_y : float
-        Scaling factor in Y (>1 stretches, <1 shrinks)
-    scale_z : float
-        Scaling factor for height values
-    method : str
-        'linear' or 'nearest'
-    fill_value : float
-        Value used outside original domain
+    x_edges, y_edges : bin edges as returned by points_to_depth_map
+    scale_x, scale_y : scaling factors (>1 stretches, <1 shrinks)
+    method : 'linear' or 'nearest'
+    fill_value : value outside original domain
 
     Returns
     -------
-    depth_map_scaled : 2D ndarray
-        Scaled depth map
+    depth_map_scaled : 2D array
+    x_edges_scaled : 1D array
+    y_edges_scaled : 1D array
     """
-    
-    #gc.collect() # purge garbage collector
 
     if depth_map.ndim != 2:
         raise ValueError("depth_map must be 2D")
 
-    H, W = depth_map.shape
+    # Cell centers
+    x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+    y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
 
-    # Original pixel centers
-    x = np.arange(W, dtype=float)
-    y = np.arange(H, dtype=float)
-
-    # Interpolator (NaN-safe)
+    # Interpolator (NaNs allowed)
     interp = RegularGridInterpolator(
-        (y, x),
+        (y_centers, x_centers),
         depth_map,
         method=method,
         bounds_error=False,
         fill_value=fill_value,
     )
 
-    # New grid size
-    Wn = int(round(W * scale_x))
-    Hn = int(round(H * scale_y))
+    # New scaled grid
+    x_centers_new = x_centers * scale_x
+    y_centers_new = y_centers * scale_y
 
-    # New pixel centers (inverse mapping!)
-    x_new = np.arange(Wn) / scale_x
-    y_new = np.arange(Hn) / scale_y
-
-    XXn, YYn = np.meshgrid(x_new, y_new)
+    XXn, YYn = np.meshgrid(x_centers_new, y_centers_new)
     query_points = np.column_stack([YYn.ravel(), XXn.ravel()])
 
-    depth_map_scaled = interp(query_points).reshape(Hn, Wn)
+    depth_map_scaled = interp(query_points).reshape(
+        len(y_centers_new), len(x_centers_new)
+    ) 
+    
+    
+    if (scale_z != 1.0):
+      depth_map_scaled = depth_map_scaled * scale_z
 
-    if scale_z != 1.0:
-        depth_map_scaled *= scale_z
+    # Scale edges accordingly
+    x_edges_scaled = x_edges * scale_x
+    y_edges_scaled = y_edges * scale_y
 
-    return depth_map_scaled.astype(depthmapVarType, copy=False)
-
+    return depth_map_scaled, x_edges_scaled, y_edges_scaled
 
 # Example utility: high-level pipeline
-def load_and_grid(input_path: str, kind: str = "pcd", resolution: float = 0.01, sample_points: int = None):
+def load_and_grid(input_path: str, kind: str = "pcd", resolution: float = 0.001, sample_points: int = None):
     """
     High-level convenience function:
       kind: 'pcd' or 'stl'
@@ -306,7 +266,7 @@ def load_and_grid(input_path: str, kind: str = "pcd", resolution: float = 0.01, 
     else:
         raise ValueError("kind must be 'pcd' or 'stl'")
     depth_map, x_edges, y_edges = points_to_depth_map(pts, resolution=resolution, agg="max")
-    return depth_map.astype(depthmapVarType, copy=False), x_edges, y_edges
+    return depth_map, x_edges, y_edges
 
 """ if __name__ == "__main__":
     # Demo: print 2D array for a fixed 2mm x 2mm square

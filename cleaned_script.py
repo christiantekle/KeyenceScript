@@ -40,32 +40,32 @@ except Exception:
 
 
 TIME_FORMAT = "%H:%M:%S"
+DEPTH_MAP_RESOLUTION_XY = 2  # microns
 
 
+# -------------------------- IO helpers ---------------------------------
+def load_stl_points(stl_filename: str, sample_points: Optional[int] = None) -> np.ndarray:
+    """
+    Load an STL file and return the vertices as an Nx3 array.
+    If `sample_points` is set, the mesh is uniformly sampled to that size.
+    """
+    if o3d is None:
+        raise RuntimeError("open3d is required for load_stl_points")
+    mesh = o3d.io.read_triangle_mesh(stl_filename)
+    if sample_points:
+        pcd = mesh.sample_points_uniformly(number_of_points=int(sample_points))
+        pts = np.asarray(pcd.points)
+    else:
+        pts = np.asarray(mesh.vertices)
+    return pts
 
-# # -------------------------- IO helpers ---------------------------------
-# def load_stl_points(stl_filename: str, sample_points: Optional[int] = None) -> np.ndarray:
-#     """
-#     Load an STL file and return the vertices as an Nx3 array.
-#     If `sample_points` is set, the mesh is uniformly sampled to that size.
-#     """
-#     if o3d is None:
-#         raise RuntimeError("open3d is required for load_stl_points")
-#     mesh = o3d.io.read_triangle_mesh(stl_filename)
-#     if sample_points:
-#         pcd = mesh.sample_points_uniformly(number_of_points=int(sample_points))
-#         pts = np.asarray(pcd.points)
-#     else:
-#         pts = np.asarray(mesh.vertices)
-#     return pts
 
-
-# def load_pcd_points(pcd_filename: str) -> np.ndarray:
-#     """Load a PCD (or any Open3D-supported point cloud) into an Nx3 array."""
-#     if o3d is None:
-#         raise RuntimeError("open3d is required for load_pcd_points")
-#     pcd = o3d.io.read_point_cloud(pcd_filename)
-#     return np.asarray(pcd.points)
+def load_pcd_points(pcd_filename: str) -> np.ndarray:
+    """Load a PCD (or any Open3D-supported point cloud) into an Nx3 array."""
+    if o3d is None:
+        raise RuntimeError("open3d is required for load_pcd_points")
+    pcd = o3d.io.read_point_cloud(pcd_filename)
+    return np.asarray(pcd.points)
 
 
 # -------------------------- Point cloud to depth map --------------------
@@ -85,71 +85,71 @@ def interpolate_nans_1d(arr: np.ndarray) -> np.ndarray:
         return arr
 
 
-# def points_to_depth_map(points: np.ndarray,
-#                         resolution: float = 0.01,
-#                         auto_level_plane: bool = True,
-#                         auto_level_tol: float = 450.0,
-#                         crop_z_min: Optional[float] = None,
-#                         crop_z_max: Optional[float] = None) -> np.ndarray:
-#     """
-#     Convert an Nx3 cloud (x,y,z) into a 2D depth map. Values are scaled 
-#     to microns to match downstream processing.
+def points_to_depth_map(points: np.ndarray,
+                        resolution: float = DEPTH_MAP_RESOLUTION_XY,
+                        auto_level_plane: bool = True,
+                        auto_level_tol: float = 450.0,
+                        crop_z_min: Optional[float] = None,
+                        crop_z_max: Optional[float] = None) -> np.ndarray:
+    """
+    Convert an Nx3 cloud (x,y,z) into a 2D depth map. Values are scaled 
+    to microns to match downstream processing.
 
-#     Returns a 2D array (rows = Y, cols = X) with NaNs for empty cells.
-#     """
-#     if points is None or points.size == 0:
-#         raise ValueError("Empty point cloud")
+    Returns a 2D array (rows = Y, cols = X) with NaNs for empty cells.
+    """
+    if points is None or points.size == 0:
+        raise ValueError("Empty point cloud")
 
-#     pts = points.copy().astype(float)
+    pts = points.copy().astype(float)
 
-#     # Convert coordinates to microns
-#     scale_xy = 1000.0 / resolution
-#     pts[:, :2] *= scale_xy
-#     pts[:, 2] *= 1000.0
+    # Convert coordinates to microns
+    scale_xy = 1000.0 / DEPTH_MAP_RESOLUTION_XY
+    pts[:, :2] *= scale_xy
+    pts[:, 2] *= 1000.0
 
-#     pts = pts[np.isfinite(pts).all(axis=1)]
-#     if pts.size == 0:
-#         raise ValueError("No finite points after cleanup")
+    pts = pts[np.isfinite(pts).all(axis=1)]
+    if pts.size == 0:
+        raise ValueError("No finite points after cleanup")
 
-#     # Optional plane leveling
-#     if auto_level_plane:
-#         pts = ransac_level_top_plane(pts, AutoLevelTolerance=auto_level_tol)
+    # Optional plane leveling
+    if auto_level_plane:
+        pts = ransac_level_top_plane(pts, AutoLevelTolerance=auto_level_tol)
 
-#     # Optional z clipping
-#     if crop_z_min is not None:
-#         pts = pts[pts[:, 2] >= crop_z_min]
-#     if crop_z_max is not None:
-#         pts = pts[pts[:, 2] <= crop_z_max]
+    # Optional z clipping
+    if crop_z_min is not None:
+        pts = pts[pts[:, 2] >= crop_z_min]
+    if crop_z_max is not None:
+        pts = pts[pts[:, 2] <= crop_z_max]
 
-#     xmin, xmax = np.nanmin(pts[:, 0]), np.nanmax(pts[:, 0])
-#     ymin, ymax = np.nanmin(pts[:, 1]), np.nanmax(pts[:, 1])
+    xmin, xmax = np.nanmin(pts[:, 0]), np.nanmax(pts[:, 0])
+    ymin, ymax = np.nanmin(pts[:, 1]), np.nanmax(pts[:, 1])
 
-#     nx = int(math.ceil(xmax - xmin)) or 1
-#     ny = int(math.ceil(ymax - ymin)) or 1
+    nx = int(math.ceil(xmax - xmin)) or 1
+    ny = int(math.ceil(ymax - ymin)) or 1
 
-#     pts[:, 0] -= xmin
-#     pts[:, 1] -= ymin
+    pts[:, 0] -= xmin
+    pts[:, 1] -= ymin
 
-#     x_idx = pts[:, 0].astype(int)
-#     y_idx = pts[:, 1].astype(int)
+    x_idx = pts[:, 0].astype(int)
+    y_idx = pts[:, 1].astype(int)
 
-#     depth_map = np.full((ny + 1, nx + 1), np.nan, dtype=np.float32)
+    depth_map = np.full((ny + 1, nx + 1), np.nan, dtype=np.float32)
 
-#     # Keep the highest z per cell
-#     for xi, yi, zi in zip(x_idx, y_idx, pts[:, 2]):
-#         if np.isnan(zi):
-#             continue
-#         cur = depth_map[yi, xi]
-#         if np.isnan(cur) or zi > cur:
-#             depth_map[yi, xi] = zi
+    # Keep the highest z per cell
+    for xi, yi, zi in zip(x_idx, y_idx, pts[:, 2]):
+        if np.isnan(zi):
+            continue
+        cur = depth_map[yi, xi]
+        if np.isnan(cur) or zi > cur:
+            depth_map[yi, xi] = zi
 
-#     # Fill small gaps
-#     for r in range(depth_map.shape[0]):
-#         depth_map[r, :] = interpolate_nans_1d(depth_map[r, :])
-#     for c in range(depth_map.shape[1]):
-#         depth_map[:, c] = interpolate_nans_1d(depth_map[:, c])
+    # Fill small gaps
+    for r in range(depth_map.shape[0]):
+        depth_map[r, :] = interpolate_nans_1d(depth_map[r, :])
+    for c in range(depth_map.shape[1]):
+        depth_map[:, c] = interpolate_nans_1d(depth_map[:, c])
 
-#     return depth_map
+    return depth_map
 
 
 # -------------------------- Plane leveling --------------------------------
@@ -473,16 +473,16 @@ except Exception:
 
 
 def plot_depth_map(depth_map: np.ndarray, title: str = "depth_map", z_min: Optional[float] = None, z_max: Optional[float] = None,
-                   lateral_resolution: float = 0.01, output_folder: str = ".") -> None:
+                   lateral_resolution: float = DEPTH_MAP_RESOLUTION_XY, output_folder: str = ".") -> None:
     """Plot a depth map and save it as PNG."""
     if plt is None:
         raise RuntimeError("matplotlib required for plotting")
-    x = np.arange(depth_map.shape[1]) * lateral_resolution
-    y = np.arange(depth_map.shape[0]) * lateral_resolution
+    x = np.arange(depth_map.shape[1]) * lateral_resolution * 1e-3
+    y = np.arange(depth_map.shape[0]) * lateral_resolution * 1e-3
     plt.figure()
     im = plt.imshow(depth_map, extent=[x.min(), x.max(), y.min(), y.max()],
                     vmin=z_min, vmax=z_max, origin='lower', cmap='jet', aspect='equal')
-    plt.colorbar(im, label='Z [mm]')
+    plt.colorbar(im, label='Z [µm]')
     plt.title(title)
     plt.xlabel('X [mm]')
     plt.ylabel('Y [mm]')
@@ -492,7 +492,7 @@ def plot_depth_map(depth_map: np.ndarray, title: str = "depth_map", z_min: Optio
     plt.close()
 
 
-def plot_3d_depth_maps(depth_maps: List[np.ndarray], lateral_resolution: float = 0.01, alphas: Optional[List[float]] = None, colormap: str = 'jet') -> None:
+def plot_3d_depth_maps(depth_maps: List[np.ndarray], lateral_resolution: float = DEPTH_MAP_RESOLUTION_XY, alphas: Optional[List[float]] = None, colormap: str = 'jet') -> None:
     """3D surface plot of one or more depth maps."""
     if plt is None:
         raise RuntimeError("matplotlib required for plotting")
@@ -501,11 +501,11 @@ def plot_3d_depth_maps(depth_maps: List[np.ndarray], lateral_resolution: float =
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ny, nx = depth_maps[0].shape
-    x = np.arange(nx) * lateral_resolution
-    y = np.arange(ny) * lateral_resolution
+    x = np.arange(nx) * lateral_resolution * 1e-3
+    y = np.arange(ny) * lateral_resolution * 1e-3
     X, Y = np.meshgrid(x, y)
     for Z in depth_maps:
-        ax.plot_surface(X, Y, Z, cmap=colormap, edgecolor='none')
+        ax.plot_surface(X, Y, Z * 1e-3, cmap=colormap, edgecolor='none')
     plt.show()
 
 
@@ -561,7 +561,7 @@ if __name__ == '__main__':
     else:
         pts = load_stl_points(path, sample_points=50000)
 
-    #dm = points_to_depth_map(pts, resolution=DEPTH_MAP_RESOLUTION_XY)
+    dm = points_to_depth_map(pts, resolution=DEPTH_MAP_RESOLUTION_XY)
     print('Depth map shape:', dm.shape)
     if plt is not None:
         plot_depth_map(dm, title='depth_map_demo')
